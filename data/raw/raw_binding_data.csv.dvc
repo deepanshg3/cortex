@@ -1,0 +1,5 @@
+outs:
+- md5: c13631cebf569d2d44bdc9fdcc658eaf
+  size: 41414417
+  hash: md5
+  path: raw_binding_data.csv
