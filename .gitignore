@@ -1,6 +1,5 @@
 # Python Environments
 venv/
-.env
 
 # Python Caches
 __pycache__/
