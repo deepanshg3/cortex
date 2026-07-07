@@ -1,0 +1,16 @@
+# Python Environments
+venv/
+.env
+
+# Python Caches
+__pycache__/
+*.pyc
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# PyTDC Cache / Temporary Data Downloads
+data/*.tab
+
+# OS generated files
+.DS_Store
