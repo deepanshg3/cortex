@@ -16,3 +16,7 @@ data/*.tab
 
 # Model Weights
 checkpoints/
+
+# Application Logs
+logs/
+*.log
