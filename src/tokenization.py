@@ -29,7 +29,9 @@ class BindingDataset(Dataset):
         # 2. Extract explicit numpy-backed arrays for ultra-fast indexing
         self.drugs = self.df.get_column("Drug").to_numpy()
         self.targets = self.df.get_column("Target").to_numpy()
-        self.labels = self.df.get_column("Y").to_numpy()
+        
+        # --- FIXED: Points dynamically to our precomputed professional 'pkd' column ---
+        self.labels = self.df.get_column("pkd").to_numpy()
         
         # 3. Initialize separate tokenizers from Hugging Face hub
         logger.info(f"Initializing Tokenizer for Chemical Tower ({Config.drug_model_name})...")
@@ -90,7 +92,7 @@ if __name__ == "__main__":
         logger.info("--- Structural Shapes for Neural Network Processing ---")
         logger.info(f"Drug Input Tensor Shape:   {sample['drug_input_ids'].shape}")
         logger.info(f"Target Input Tensor Shape: {sample['target_input_ids'].shape}")
-        logger.info(f"Ground Truth Affinity (Y): {sample['label'].item()}")
+        logger.info(f"Ground Truth Affinity (pK_d): {sample['label'].item():.4f}")
         logger.info("Pipeline validation step complete. Ready for neural building.")
         
     except Exception as e:
