@@ -20,3 +20,5 @@ checkpoints/
 # Application Logs
 logs/
 *.log
+
+data.zip
