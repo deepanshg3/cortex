@@ -14,8 +14,6 @@ data/*.tab
 # OS generated files
 .DS_Store
 
-# Model Weights
-checkpoints/
 
 # Application Logs
 logs/
