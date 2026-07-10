@@ -34,24 +34,31 @@ class Config:
     
     # The Bridge: Cross-Attention
     hidden_dim: int = 256
-    num_attention_heads: int = 4
-    dropout_rate: float = 0.1
+    num_attention_heads: int = 8       # UPGRADED: From 4 to 8 for better "searching"
+    dropout_rate: float = 0.1          # UPGRADED: To protect the new 3-layer MLP from overfitting
 
     # ---------------------------------------------------------
     # 4. LoRA (Low-Rank Adaptation) Settings
     # ---------------------------------------------------------
-    lora_r: int = 8
-    lora_alpha: int = 16
-    lora_dropout: float = 0.05
-    # We apply LoRA to the attention projection matrices
-    target_modules: tuple = ("query", "key", "value")
+    lora_r: int = 16                   # UPGRADED: Doubled capacity for complex chemistry
+    lora_alpha: int = 32               # UPGRADED: Scaled to match the new rank
+    lora_dropout: float = 0.1
+    # We apply LoRA to the attention projection matrices AND the dense layers now
+    target_modules: tuple = ("query", "key", "value", "dense")
 
     # ---------------------------------------------------------
     # 5. Training Hyperparameters
     # ---------------------------------------------------------
-    # Kept small to fit comfortably in bare-metal GPU memory
-    batch_size: int = 16
+    batch_size: int = 32               # UPGRADED: Bumped from 16 to leverage Kaggle T4 GPUs
     epochs: int = 20
     learning_rate: float = 1e-4
-    weight_decay: float = 0.01
+    weight_decay: float = 0.05         # UPGRADED: Heavier penalty for overfitting
     early_stopping_patience: int = 3
+    
+    # ---------------------------------------------------------
+    # 6. Online Hard Example Mining (OHEM)
+    # ---------------------------------------------------------
+    # Wait until Epoch 5 to start mining so the model establishes a baseline first
+    hard_mining_start_epoch: int = 5
+    # When mining is active, only calculate gradients on the hardest 50% of the batch
+    hard_mining_fraction: float = 0.5
