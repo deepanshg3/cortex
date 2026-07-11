@@ -31,7 +31,7 @@ def evaluate_model():
     logger.info("Constructing Network and loading optimal weights...")
     model = BindingModel().to(device)
     
-    checkpoint_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "checkpoints", "best_model.pt"))
+    checkpoint_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "checkpoints", "best_model_2.pt"))
     if not os.path.exists(checkpoint_path):
         logger.error(f"Checkpoint not found at {checkpoint_path}. Did you rename the downloaded file?")
         return
