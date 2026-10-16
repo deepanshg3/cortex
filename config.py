@@ -8,7 +8,7 @@ class Config:
     # ---------------------------------------------------------
     project_name: str = "cortex-dti"
     seed: int = 42
-    
+
     # Auto-detect if your bare-metal setup has CUDA available
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -18,7 +18,7 @@ class Config:
     train_path: str = "data/processed/train.parquet"
     val_path: str = "data/processed/val.parquet"
     test_path: str = "data/processed/test.parquet"
-    
+
     # The safety limits we discovered during EDA
     max_drug_len: int = 200
     max_target_len: int = 1000
@@ -28,10 +28,10 @@ class Config:
     # ---------------------------------------------------------
     # Tower 1: The Chemical Reader
     drug_model_name: str = "ibm/MoLFormer-XL-both-10pct"
-    
+
     # Tower 2: The Protein Reader (Using the highly efficient 8M parameter version)
     target_model_name: str = "facebook/esm2_t6_8M_UR50D"
-    
+
     # The Bridge: Cross-Attention
     hidden_dim: int = 256
     num_attention_heads: int = 8       # UPGRADED: From 4 to 8 for better "searching"
@@ -54,7 +54,7 @@ class Config:
     learning_rate: float = 1e-4
     weight_decay: float = 0.05         # UPGRADED: Heavier penalty for overfitting
     early_stopping_patience: int = 3
-    
+
     # ---------------------------------------------------------
     # 6. Online Hard Example Mining (OHEM)
     # ---------------------------------------------------------
@@ -62,3 +62,11 @@ class Config:
     hard_mining_start_epoch: int = 5
     # When mining is active, only calculate gradients on the hardest 50% of the batch
     hard_mining_fraction: float = 0.5
+
+    # ---------------------------------------------------------
+    # 7. Edge Deployment / Inference Settings
+    # ---------------------------------------------------------
+    # Where the inference script should look for the final trained weights
+    inference_weights_path: str = "checkpoints/best_model.pt"
+    # Force FP16 precision during bare-metal edge inference
+    use_fp16_inference: bool = True
