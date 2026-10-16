@@ -1,99 +1,127 @@
+"""Dataset and dynamic-padding collator for Cortex.
+
+Reads the DVC-tracked Parquet splits, tokenises SMILES with the MoLFormer
+tokenizer and protein FASTA with the ESM-2 tokenizer, and returns per-sample
+tensors. Padding is applied to ``max_*_len`` here; the collator trims to the
+batch maximum to avoid wasted compute.
+"""
+
+from __future__ import annotations
+
 import os
 import sys
+from typing import Dict, List
+
 import torch
 from torch.utils.data import Dataset
-import polars as pl
 from transformers import AutoTokenizer
 
-# Append root directory to path so we can import config natively
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import Config
-from src.logger import get_logger
+from config import Config  # noqa: E402
+from src.logger import get_logger  # noqa: E402
 
-# Initialize the centralized logger for this specific file
 logger = get_logger(__name__)
 
+
+def _read_parquet(path: str):
+    """Read parquet preferring polars, falling back to pandas."""
+    try:
+        import polars as pl
+
+        return pl.read_parquet(path), "polars"
+    except Exception:
+        import pandas as pd
+
+        return pd.read_parquet(path), "pandas"
+
+
 class BindingDataset(Dataset):
-    def __init__(self, data_path: str):
-        """
-        Custom PyTorch Dataset for Drug-Target Interaction tracking.
-        Reads highly optimized Parquet files directly.
-        """
-        # 1. Load the Parquet data shard
+    def __init__(self, data_path: str, config: Config | None = None):
+        self.config = config if config is not None else Config()
         if not os.path.exists(data_path):
-            logger.error(f"Data path not found at: {data_path}")
-            raise FileNotFoundError(f"Data path not found at: {data_path}. Ensure data/processed steps ran successfully.")
-        
-        self.df = pl.read_parquet(data_path)
-        
-        # 2. Extract explicit numpy-backed arrays for ultra-fast indexing
-        self.drugs = self.df.get_column("Drug").to_numpy()
-        self.targets = self.df.get_column("Target").to_numpy()
-        
-        # --- FIXED: Points dynamically to our precomputed professional 'pkd' column ---
-        self.labels = self.df.get_column("pkd").to_numpy()
-        
-        # 3. Initialize separate tokenizers from Hugging Face hub
-        logger.info(f"Initializing Tokenizer for Chemical Tower ({Config.drug_model_name})...")
-        self.drug_tokenizer = AutoTokenizer.from_pretrained(Config.drug_model_name, trust_remote_code=True)
-        
-        logger.info(f"Initializing Tokenizer for Protein Tower ({Config.target_model_name})...")
-        self.target_tokenizer = AutoTokenizer.from_pretrained(Config.target_model_name)
+            raise FileNotFoundError(f"Data path not found: {data_path}")
+
+        df, backend = _read_parquet(data_path)
+        self._backend = backend
+
+        required = [self.config.drug_col, self.config.target_col, self.config.label_col]
+        cols = df.columns
+        missing = [c for c in required if c not in cols]
+        if missing:
+            raise ValueError(f"{data_path} missing required columns: {missing}")
+
+        if backend == "polars":
+            self.drugs = df.get_column(self.config.drug_col).to_numpy()
+            self.targets = df.get_column(self.config.target_col).to_numpy()
+            self.labels = df.get_column(self.config.label_col).to_numpy().astype("float64")
+            self.drug_ids = (
+                df.get_column("Drug_ID").to_numpy() if "Drug_ID" in cols else None
+            )
+            self.target_ids = (
+                df.get_column("Target_ID").to_numpy() if "Target_ID" in cols else None
+            )
+        else:
+            self.drugs = df[self.config.drug_col].to_numpy()
+            self.targets = df[self.config.target_col].to_numpy()
+            self.labels = df[self.config.label_col].to_numpy(dtype="float64")
+            self.drug_ids = df["Drug_ID"].to_numpy() if "Drug_ID" in cols else None
+            self.target_ids = df["Target_ID"].to_numpy() if "Target_ID" in cols else None
+
+        logger.info(
+            "Initializing tokenizers (drug=%s, target=%s)",
+            self.config.drug_model_name,
+            self.config.target_model_name,
+        )
+        self.drug_tokenizer = AutoTokenizer.from_pretrained(
+            self.config.drug_model_name, trust_remote_code=True
+        )
+        self.target_tokenizer = AutoTokenizer.from_pretrained(self.config.target_model_name)
 
     def __len__(self) -> int:
         return len(self.labels)
 
-    def __getitem__(self, idx: int) -> dict:
-        # Pull strings from our localized index positions
+    def set_label_normalization(self, mean: float, std: float) -> None:
+        """Enable standardisation of the label returned by ``__getitem__``."""
+        self._label_mean = float(mean)
+        self._label_std = float(std) if std else 1.0
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         drug_str = str(self.drugs[idx])
         target_str = str(self.targets[idx])
         label = float(self.labels[idx])
-        
-        # Tokenize the Chemical String (MolFormer)
+        if getattr(self, "_label_mean", None) is not None:
+            label = (label - self._label_mean) / self._label_std
+
         drug_tokens = self.drug_tokenizer(
             drug_str,
-            max_length=Config.max_drug_len,
+            max_length=self.config.max_drug_len,
             padding="max_length",
             truncation=True,
-            return_tensors="pt"
+            return_tensors="pt",
         )
-        
-        # Tokenize the Protein Sequence (ESM-2)
         target_tokens = self.target_tokenizer(
             target_str,
-            max_length=Config.max_target_len,
+            max_length=self.config.max_target_len,
             padding="max_length",
             truncation=True,
-            return_tensors="pt"
+            return_tensors="pt",
         )
-        
-        # Return a dictionary containing clean PyTorch tensors
         return {
-            # Squeeze removes the unnecessary batch dimension (1, Seq_Len) -> (Seq_Len)
             "drug_input_ids": drug_tokens["input_ids"].squeeze(0),
             "drug_attention_mask": drug_tokens["attention_mask"].squeeze(0),
             "target_input_ids": target_tokens["input_ids"].squeeze(0),
             "target_attention_mask": target_tokens["attention_mask"].squeeze(0),
-            "label": torch.tensor(label, dtype=torch.float32)
+            "label": torch.tensor(label, dtype=torch.float32),
         }
 
-# ---------------------------------------------------------------------
-# Debugging / Sanity Check Loop
-# ---------------------------------------------------------------------
-if __name__ == "__main__":
-    logger.info("Executing Tokenization Integration Test")
-    try:
-        # Load the validation dataset shard to run a quick trace test
-        test_dataset = BindingDataset(data_path=Config.val_path)
-        logger.info(f"Dataset successfully parsed! Total samples loaded: {len(test_dataset)}")
-        
-        # Pull a single tokenized batch item to verify data shape completeness
-        sample = test_dataset[0]
-        logger.info("--- Structural Shapes for Neural Network Processing ---")
-        logger.info(f"Drug Input Tensor Shape:   {sample['drug_input_ids'].shape}")
-        logger.info(f"Target Input Tensor Shape: {sample['target_input_ids'].shape}")
-        logger.info(f"Ground Truth Affinity (pK_d): {sample['label'].item():.4f}")
-        logger.info("Pipeline validation step complete. Ready for neural building.")
-        
-    except Exception as e:
-        logger.error(f"Tokenizer verification step failed: {str(e)}")
+
+def dynamic_collate_fn(batch: List[Dict[str, torch.Tensor]]):
+    """Trim padded sequences to the batch maximum, then default-collate."""
+    max_drug = max(int((item["drug_attention_mask"] == 1).sum().item()) for item in batch)
+    max_target = max(int((item["target_attention_mask"] == 1).sum().item()) for item in batch)
+    for item in batch:
+        item["drug_input_ids"] = item["drug_input_ids"][:max_drug]
+        item["drug_attention_mask"] = item["drug_attention_mask"][:max_drug]
+        item["target_input_ids"] = item["target_input_ids"][:max_target]
+        item["target_attention_mask"] = item["target_attention_mask"][:max_target]
+    return torch.utils.data.dataloader.default_collate(batch)
